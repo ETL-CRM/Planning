@@ -87,10 +87,16 @@ create trigger trg_jobs_updated_at
 -- role: 'admin' | 'planning' | 'viewer'
 -- New signups default to 'viewer'. Promote the first admin manually
 -- (see README "First-time setup").
+--
+-- Sign-in is username + password, not email. Supabase Auth still needs an
+-- email internally, so the app builds a fake one behind the scenes
+-- (e.g. "rizvi.hasan@users.enamtrims.internal") and stores it in `email`.
+-- The real, human-facing username lives in the `username` column below.
 
 create table if not exists profiles (
   id          uuid references auth.users on delete cascade primary key,
-  email       text,
+  email       text,                       -- internal-only synthetic address, not a real inbox
+  username    text unique,                -- what people actually sign in with
   full_name   text,
   role        text not null default 'viewer' check (role in ('admin','planning','viewer')),
   -- per-page view/edit overrides, e.g. {"hold":{"view":true,"edit":false}}
@@ -99,6 +105,16 @@ create table if not exists profiles (
   created_at  timestamptz default now()
 );
 
+-- if this table already existed before "username" was added, this adds it safely
+alter table profiles add column if not exists username text;
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'profiles_username_key') then
+    alter table profiles add constraint profiles_username_key unique (username);
+  end if;
+end $$;
+-- backfill username for any existing rows created before this column existed
+update profiles set username = split_part(email, '@', 1) where username is null;
+
 -- if this table already existed before "permissions" was added, this adds it safely
 alter table profiles add column if not exists permissions jsonb not null default '{}'::jsonb;
 
@@ -106,8 +122,8 @@ alter table profiles add column if not exists permissions jsonb not null default
 create or replace function handle_new_user()
 returns trigger as $$
 begin
-  insert into public.profiles (id, email, role)
-  values (new.id, new.email, 'viewer');
+  insert into public.profiles (id, email, username, role)
+  values (new.id, new.email, coalesce(new.raw_user_meta_data->>'username', split_part(new.email,'@',1)), 'viewer');
   return new;
 end;
 $$ language plpgsql security definer;
@@ -183,5 +199,5 @@ create policy "import_log_insert" on import_log
 -- ============================================================
 -- Done. Next step: create your first user via Supabase
 -- Authentication tab, then in SQL editor run:
---   update profiles set role = 'admin' where email = 'you@company.com';
+--   update profiles set role = 'admin' where username = 'yourusername';
 -- ============================================================
