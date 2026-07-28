@@ -299,8 +299,8 @@
     <div id="auth-error" class="auth-error" style="display:none;"></div>
     <form id="auth-form" autocomplete="on">
       <div class="field">
-        <label>Username</label>
-        <input type="text" id="auth-username" name="username" placeholder="e.g. rizvi.hasan" autocomplete="username" required>
+        <label>Work Email</label>
+        <input type="email" id="auth-email" name="username" placeholder="you@enamtrims.com" autocomplete="username" required>
       </div>
       <div class="field">
         <label>Password</label>
@@ -482,60 +482,31 @@ function toggleTheme(){
   applyTheme(cur==='dark' ? 'light' : 'dark');
 }
 
-// Supabase Auth requires an email internally, but people only ever see/type
-// a username. We build a fake, never-emailed address behind the scenes —
-// e.g. "rizvi.hasan" -> "rizvi.hasan@users.enamtrims.internal" — and that's
-// what actually gets stored as auth.users.email. This also means each
-// username is automatically unique, since Supabase won't allow duplicate
-// emails to sign up.
-// NOTE: this must NOT be a reserved/special-use domain (.test, .example,
-// .invalid, .localhost, .internal, etc.) — Supabase's email validator
-// rejects those outright, even though no mail is ever actually sent here.
-const USERNAME_EMAIL_DOMAIN = 'users.enamtrims-app.com';
-function normalizeUsername(raw){
-  return String(raw||'').trim().toLowerCase().replace(/[^a-z0-9._-]/g, '');
-}
-function usernameToEmail(username){
-  return normalizeUsername(username) + '@' + USERNAME_EMAIL_DOMAIN;
-}
-
 async function handleAuthSubmit(){
-  const usernameRaw = document.getElementById('auth-username').value.trim();
+  const email = document.getElementById('auth-email').value.trim();
   const password = document.getElementById('auth-password').value;
   const errBox = document.getElementById('auth-error');
   errBox.style.display='none';
   errBox.className='auth-error';
 
-  const username = normalizeUsername(usernameRaw);
-  if (!username || !password){ errBox.textContent='Enter a username and password.'; errBox.style.display='block'; return; }
-  if (username !== usernameRaw.trim().toLowerCase()){ errBox.textContent='Username can only use letters, numbers, dots, underscores or hyphens (no spaces).'; errBox.style.display='block'; return; }
+  if (!email || !password){ errBox.textContent='Enter your email and password.'; errBox.style.display='block'; return; }
 
-  const email = usernameToEmail(username);
   let res;
   if (authMode === 'signin'){
     res = await supa.auth.signInWithPassword({ email, password });
     if (res.error){
-      // Most common reason a correct-looking username/password fails here:
-      // "Confirm email" is still ON in Supabase, so the account is stuck
-      // pending a confirmation email that this fake address can never receive.
       errBox.textContent = res.error.message.includes('Email not confirmed')
-        ? 'This account is waiting on email confirmation, which username accounts can\'t receive. Ask an Admin to turn OFF "Confirm email" in Supabase → Authentication → Settings.'
+        ? 'This account is waiting on email confirmation. Ask an Admin to turn OFF "Confirm email" in Supabase → Authentication → Settings, or check your inbox for the confirmation link.'
         : res.error.message;
       errBox.style.display='block';
       return;
     }
   } else {
-    res = await supa.auth.signUp({ email, password, options: { data: { username } } });
-    if (res.error){
-      errBox.textContent = res.error.message.includes('already registered')
-        ? 'That username is already taken.'
-        : res.error.message;
-      errBox.style.display='block';
-      return;
-    }
+    res = await supa.auth.signUp({ email, password });
+    if (res.error){ errBox.textContent = res.error.message; errBox.style.display='block'; return; }
     if (!res.data.session){
       errBox.className='auth-note';
-      errBox.textContent='Account created, but sign-in didn\'t start automatically — this usually means "Confirm email" is still ON in Supabase. Ask an Admin to turn it OFF (Authentication → Settings), then try signing in.';
+      errBox.textContent='Account created. Check your email to confirm, then sign in — or ask an Admin to turn OFF "Confirm email" in Supabase for instant access.';
       errBox.style.display='block';
     }
   }
@@ -554,7 +525,7 @@ async function onLoggedIn(){
   profile = prof || { id: session.user.id, email: session.user.email, username: fallbackUsername, role: 'viewer' };
   if (!profile.username) profile.username = fallbackUsername;
 
-  document.getElementById('user-email').textContent = profile.username;
+  document.getElementById('user-email').textContent = profile.email || session.user.email;
   document.getElementById('user-role').textContent = profile.role;
 
   renderNav();
@@ -1428,11 +1399,11 @@ async function renderUsers(main){
   if (error){ document.getElementById('users-table').innerHTML = `<div class="empty-state">Failed to load users: ${error.message}</div>`; return; }
   document.getElementById('users-table').innerHTML = `
     <table>
-      <thead><tr><th>Username</th><th>Joined</th><th>Role</th><th>Page access</th></tr></thead>
+      <thead><tr><th>Email</th><th>Joined</th><th>Role</th><th>Page access</th></tr></thead>
       <tbody>
         ${data.map(u=>`
           <tr>
-            <td>${u.username || (u.email||'').split('@')[0]}</td>
+            <td>${u.email}</td>
             <td>${fmtDate(u.created_at)}</td>
             <td>
               <select class="role-select" data-uid="${u.id}">
