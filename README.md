@@ -6,6 +6,13 @@ Files:
 `schema.sql` — run once in Supabase (or re-run — it's safe to run again)
 `index.html` — the whole app (no build step)
 What's new in this update
+Planning Master page — a dedicated page (separate from All Jobs) showing
+every open job, where Planning sets Priority (Urgent/High/Normal/Low),
+Planned Date, and Planning Notes to decide what runs next. This is
+the one page that mirrors what your old "Planning Master" Excel tab did —
+the working list Planning actively curates, not just a computed risk view.
+It sorts by priority by default (Urgent first); click any other column to
+re-sort. Re-run `schema.sql` for this — see below.
 Sign in with a username, not an email address — like an internal work
 tool, not a public website. See "Set up Supabase" below: this makes turning
 OFF "Confirm email" mandatory now, not optional (details there).
