@@ -6,6 +6,14 @@ Files:
 `schema.sql` — run once in Supabase (or re-run — it's safe to run again)
 `index.html` — the whole app (no build step)
 What's new in this update
+Sign in with your real work email again — after trying a
+username-only login, we went back to real email + password. The
+username-only version needed a fake internal email address behind the
+scenes to satisfy Supabase, and that fake address caused real problems
+(rejected as invalid, hit email rate limits, got out of sync with the
+app). Real email avoids all of that outright. A friendly display name
+(e.g. "rahatul" from rahatul@enamtrims.com) still shows in Manage Users
+and "updated by" fields — you just sign in with the real address.
 Planning Master page — a dedicated page (separate from All Jobs) that
 works exactly like your Excel "Planning Master" tab did, once we actually
 traced its formulas: every column there except Job No was a VLOOKUP off
@@ -16,12 +24,8 @@ Numbers (paste from Excel, or upload a file), and everything else
 it's the same underlying data as your ERP import — no VLOOKUP needed.
 Once a job's on the list, set Priority (Urgent/High/Normal/Low),
 Planned Date, and Planning Notes on it to decide what runs next.
-Untick "On Plan" to take a job back off the list. Re-run `schema.sql` for
-this — see below.
-Sign in with a username, not an email address — like an internal work
-tool, not a public website. See "Set up Supabase" below: this makes turning
-OFF "Confirm email" mandatory now, not optional (details there).
-Browser can save your username/password, the same way it does on other
+Untick "On Plan" to take a job back off the list.
+Browser can save your email/password, the same way it does on other
 sites — sign in once, choose "Save password" when the browser offers, and
 it'll auto-fill next time.
 Dark / light mode — toggle at the bottom of the sidebar. Remembers your
@@ -36,25 +40,23 @@ Every column has a filter — click the ▾ next to any column header for
 an Excel-style checklist filter, searchable, with your active filters shown
 next to the search box (and a "Clear column filters" button).
 ⚠️ If you already have this app deployed: re-run the updated `schema.sql`
-once in Supabase's SQL Editor — it adds `permissions` and `username` columns
-to `profiles` and is safe to run on top of existing data (nothing is dropped).
-It also backfills a `username` for any accounts that signed up before this
-change, using the part of their email before the `@`. Then replace
-`index.html` with this new version (keep your existing `SUPABASE_URL` /
-`SUPABASE_ANON_KEY` lines), and turn off "Confirm email" — see below,
-this step is no longer optional.
+once in Supabase's SQL Editor — it's safe to run again on top of existing
+data (nothing is dropped), and it removes the old username-uniqueness rule
+that no longer applies now that login is by email. Then replace `index.html`
+with this new version (keep your existing `SUPABASE_URL` / `SUPABASE_ANON_KEY`
+lines).
 ---
 1. Set up Supabase (5 minutes)
 Go to https://supabase.com → your project (or create a new one).
 Open SQL Editor → paste the entire contents of `schema.sql` → Run.
 This creates the `jobs`, `profiles`, and `import_log` tables plus security rules.
 Open Authentication → Providers → make sure Email is enabled.
-Open Authentication → Settings → turn OFF "Confirm email".
-This is required, not optional: since people sign in with a username
-rather than a real email address, the app builds a fake internal address
-behind the scenes to satisfy Supabase — and that fake address can never
-receive a confirmation email. With "Confirm email" left on, every new
-account will be stuck forever waiting on a message that can't arrive.
+(Optional but recommended for internal tools) Open Authentication →
+Settings → turn OFF "Confirm email" so new accounts can sign in
+immediately without waiting on a confirmation email. Since everyone now
+signs up with a real, working company email, it's fine to leave this ON
+too if you'd rather people confirm their address first — that's a real
+choice now, not a workaround.
 Open Project Settings → API. Copy two values:
 Project URL (looks like `https://xxxxx.supabase.co`)
 anon public key (a long string — NOT the `service_role` key)
@@ -68,11 +70,11 @@ Replace both with the values from step 1.5. Save the file.
 3. Create your first account and make yourself Admin
 Deploy the app first (step 4 below), or just open `index.html` locally in
 a browser (double-click it — it works without a server).
-Click "Create an account", choose a username (letters, numbers,
-dots, underscores or hyphens — no spaces) and a password.
+Click "Create an account", sign up with your real work email
+(e.g. `rahatul@enamtrims.com`) and a password.
 Back in Supabase → SQL Editor, run:
 ```sql
-   update profiles set role = 'admin' where username = 'yourusername';
+   update profiles set role = 'admin' where email = 'rahatul@enamtrims.com';
    ```
 Refresh the app and sign in. You'll now see Import Data and
 Manage Users in the sidebar.
@@ -81,9 +83,10 @@ the Planning role once they sign up (they can edit committed EDD,
 hold reasons, and import data; they can't delete jobs or change roles).
 From the same page you can also fine-tune exactly which pages each person
 can see and edit — see "Managing who sees / edits what" below.
-No password-reset email exists since accounts don't have a real inbox
-behind them — if someone forgets their password, an Admin resets it for them
-in Supabase → Authentication → Users → find the account → Reset password.
+Forgot password? If "Confirm email" is on and you have real SMTP/email
+configured in Supabase, the normal password-reset flow works. Otherwise, an
+Admin can reset it directly in Supabase → Authentication → Users → find the
+account → Reset password.
 4. Deploy (GitHub + Vercel)
 Create a new GitHub repo, upload `index.html` (and this README) to it.
 Go to https://vercel.com → Add New Project → import that repo.
@@ -150,14 +153,14 @@ Troubleshooting
 `SUPABASE_URL` / `SUPABASE_ANON_KEY` constants in `index.html`.
 Can't import / no Import Data menu → your account is still `viewer`;
 ask an Admin to promote you in Manage Users.
-"That username is already taken" → someone already signed up with
-that username; pick a different one, or ask an Admin to check
-Supabase → Authentication → Users if you think it should be yours.
-Sign-up creates the account but sign-in never starts or
-"Email not confirmed" error → "Confirm email" is still ON in Supabase.
-Go to Authentication → Settings and turn it OFF — it's required for
-username accounts, since the fake internal address behind each username
-can never actually receive a confirmation email.
-Forgot password → there's no "forgot password" email flow for the
-same reason. An Admin resets it manually in Supabase → Authentication →
-Users → find the account → Reset password.
+"User already registered" → that email already has an account; sign
+in instead, or ask an Admin to check Supabase → Authentication → Users
+if you think it should be yours.
+Sign-up creates the account but sign-in never starts, or an
+"Email not confirmed" error → "Confirm email" is ON in Supabase and
+the account is waiting on a real confirmation email. Either check that
+inbox for the link, or have an Admin turn "Confirm email" OFF in
+Authentication → Settings for instant access going forward.
+Forgot password → if "Confirm email"/SMTP is set up, the normal
+password-reset flow works. Otherwise an Admin resets it manually in
+Supabase → Authentication → Users → find the account → Reset password.
