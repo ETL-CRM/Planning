@@ -6,13 +6,18 @@ Files:
 `schema.sql` — run once in Supabase (or re-run — it's safe to run again)
 `index.html` — the whole app (no build step)
 What's new in this update
-Planning Master page — a dedicated page (separate from All Jobs) showing
-every open job, where Planning sets Priority (Urgent/High/Normal/Low),
-Planned Date, and Planning Notes to decide what runs next. This is
-the one page that mirrors what your old "Planning Master" Excel tab did —
-the working list Planning actively curates, not just a computed risk view.
-It sorts by priority by default (Urgent first); click any other column to
-re-sort. Re-run `schema.sql` for this — see below.
+Planning Master page — a dedicated page (separate from All Jobs) that
+works exactly like your Excel "Planning Master" tab did, once we actually
+traced its formulas: every column there except Job No was a VLOOKUP off
+ERP DATA. The only thing a person ever typed was the Job No itself. So
+this page is the same idea — a working list you build by adding Job
+Numbers (paste from Excel, or upload a file), and everything else
+(customer, EDD, qty, hold status…) is already there automatically, because
+it's the same underlying data as your ERP import — no VLOOKUP needed.
+Once a job's on the list, set Priority (Urgent/High/Normal/Low),
+Planned Date, and Planning Notes on it to decide what runs next.
+Untick "On Plan" to take a job back off the list. Re-run `schema.sql` for
+this — see below.
 Sign in with a username, not an email address — like an internal work
 tool, not a public website. See "Set up Supabase" below: this makes turning
 OFF "Confirm email" mandatory now, not optional (details there).
@@ -94,11 +99,20 @@ built to read the same columns as your ERP "Job Register" export
 (Job No, Customer, Department, EDD, Hold Status, Delivered Qty,
 Required Qty, etc.). Existing jobs are updated by Job No; new ones
 are added. Nothing is deleted by an import.
+Planning Master: add jobs to your working list by pasting Job Numbers
+(one per line — copy straight from column A of your old Excel Planning
+Master tab, or from anywhere) or uploading a file with a Job No column.
+A job has to already be imported from ERP before it can be added here.
+Once it's on the list, click into Priority / Planned Date / Planning
+Notes to fill them in. Untick "On Plan" to remove a job from the list —
+this doesn't touch the job's ERP data at all, just takes it off Planning's
+active view.
 Dashboard: risk-ranked list of jobs, department load, and hold/material/
 overdue snapshot — built for management to see what's at risk and why.
-Committed EDD and Hold Reason are the two fields you can edit
-directly in the tables (click the dashed-underline cells) — everything
-else comes from your ERP import.
+Every column is editable on any page you have edit rights to — click
+a cell to type directly, Enter to save, Esc to cancel. The only fields
+that come purely from ERP and aren't meant to be hand-edited are the ones
+without a click cursor (e.g. Job No, Risk).
 How the risk score works
 Each open job accumulates points (capped at 100), so multiple problems on
 the same job stack up:
