@@ -56,6 +56,7 @@ create table if not exists jobs (
   planned_machine         text,
   planned_date            date,
   planning_notes          text,
+  priority                text default 'Normal' check (priority in ('Urgent','High','Normal','Low')),
 
   -- bookkeeping
   created_at              timestamptz default now(),
@@ -67,6 +68,15 @@ create index if not exists idx_jobs_job_no on jobs (job_no);
 create index if not exists idx_jobs_department on jobs (department);
 create index if not exists idx_jobs_hold_status on jobs (hold_status);
 create index if not exists idx_jobs_edd on jobs (edd);
+
+-- if this table already existed before "priority" was added, this adds it safely
+alter table jobs add column if not exists priority text default 'Normal';
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'jobs_priority_check') then
+    alter table jobs add constraint jobs_priority_check check (priority in ('Urgent','High','Normal','Low'));
+  end if;
+end $$;
+update jobs set priority = 'Normal' where priority is null;
 
 -- keep updated_at fresh on every write
 create or replace function set_updated_at()
@@ -90,7 +100,7 @@ create trigger trg_jobs_updated_at
 --
 -- Sign-in is username + password, not email. Supabase Auth still needs an
 -- email internally, so the app builds a fake one behind the scenes
--- (e.g. "rizvi.hasan@users.enamtrims.internal") and stores it in `email`.
+-- (e.g. "rizvi.hasan@users.enamtrims-app.com") and stores it in `email`.
 -- The real, human-facing username lives in the `username` column below.
 
 create table if not exists profiles (
