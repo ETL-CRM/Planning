@@ -715,7 +715,7 @@ function renderView(key){
   switch(key){
     case 'dashboard': renderDashboard(main); break;
     case 'alljobs': renderTableView(main, {title:'All Jobs', sub:'Every job currently in the system', filterFn:()=>true}); break;
-    case 'planningmaster': renderTableView(main, {title:'Planning Master', sub:'Every open job — set priority, planned date, and notes to decide what runs next', filterFn:j=>!isFullyDelivered(j), defaultSort:'priority'}); break;
+    case 'planningmaster': renderTableView(main, {title:'Planning Master', sub:'Your curated working list — add a job below to start planning it, set Priority / Planned Date / Notes, untick "On Plan" to remove it.', filterFn:j=>!!j.in_planning, defaultSort:'priority', planningAdd:true, emptyTitle:'Nothing on your plan yet', emptySub:'Add job numbers below — paste from Excel or upload a file.'}); break;
     case 'check': renderTableView(main, {title:'Check — Undelivered Jobs', sub:'All jobs with outstanding quantity, sorted by EDD', filterFn:j=>!isFullyDelivered(j), defaultSort:'edd'}); break;
     case 'partial': renderTableView(main, {title:'Partial Status', sub:'Jobs partially delivered with a remaining balance', filterFn:isPartial}); break;
     case 'hold': renderTableView(main, {title:'HOLD', sub:'Jobs currently on hold and why', filterFn:j=>j._isHold && !isFullyDelivered(j)}); break;
@@ -841,6 +841,7 @@ const TABLE_COLS = [
   { key:'job_status',     label:'Status',        type:'text',   editable:true },
   { key:'priority',       label:'Priority',      type:'select', editable:true, options:['Urgent','High','Normal','Low'] },
   { key:'planned_date',   label:'Planned Date',  type:'date',   editable:true },
+  { key:'in_planning',    label:'On Plan',       type:'checkbox', editable:true, filterable:false, views:['planningmaster'] },
   { key:'hold_status',    label:'Hold Status',   type:'text',   editable:true },
   { key:'hold_reason',    label:'Hold Reason',   type:'text',   editable:true },
   { key:'planning_notes', label:'Planning Notes',type:'text',   editable:true },
@@ -867,6 +868,9 @@ function colCellHtml(col, j, canEdit){
     const p = j.priority || 'Normal';
     return `<td><span class="badge ${PRIORITY_BADGE[p]||'none'}">${p}</span></td>`;
   }
+  if (col.type==='checkbox'){
+    return `<td style="text-align:center;"><input type="checkbox" class="pm-checkbox" data-job="${j.job_no}" data-checkbox-field="${col.key}" ${j[col.key]?'checked':''} ${canEdit?'':'disabled'}></td>`;
+  }
   const raw = j[col.key];
   const disp = colDisplay(col, j);
   const align = col.type==='number' ? ' class="num' + (col.editable && canEdit ? ' editable-cell' : '') + '"' : (col.editable && canEdit ? ' class="editable-cell"' : '');
@@ -886,6 +890,8 @@ function renderTableView(main, opts){
   if (opts.defaultSort) sortState = { key: opts.defaultSort, dir: 1 };
   const depts = [...new Set(allJobs.map(j=>j.department).filter(Boolean))].sort();
   columnFilters = {};
+  const cols = TABLE_COLS.filter(c => !c.views || c.views.includes(currentView));
+  const canEdit = canEditKey(currentView);
 
   main.innerHTML = `
     <div class="page-head">
@@ -894,6 +900,7 @@ function renderTableView(main, opts){
         <p class="page-sub">${opts.sub}</p>
       </div>
     </div>
+    ${opts.planningAdd && canEdit ? planningAddPanelHtml() : ''}
     <div class="toolbar">
       <input type="text" id="search-box" placeholder="Search job no, customer, description…">
       <select id="dept-filter">
@@ -908,8 +915,7 @@ function renderTableView(main, opts){
   document.getElementById('search-box').addEventListener('input', e=>{ searchTerm = e.target.value.toLowerCase(); drawTable(); });
   document.getElementById('dept-filter').addEventListener('change', e=>{ deptFilter = e.target.value; drawTable(); });
   document.getElementById('clear-filters-btn').addEventListener('click', ()=>{ columnFilters = {}; drawTable(); });
-
-  const canEdit = canEditKey(currentView);
+  if (opts.planningAdd && canEdit) wirePlanningAddPanel(drawTable);
 
   function baseRows(excludeCol){
     let rows = allJobs.filter(opts.filterFn);
@@ -954,7 +960,7 @@ function renderTableView(main, opts){
     document.getElementById('clear-filters-btn').style.display = Object.keys(columnFilters).length ? 'inline-flex' : 'none';
     const cont = document.getElementById('table-container');
     if (!rows.length){
-      cont.innerHTML = `<div class="table-wrap"><div class="empty-state"><h3>No jobs match</h3><p>Try clearing filters or search.</p></div></div>`;
+      cont.innerHTML = `<div class="table-wrap"><div class="empty-state"><h3>${opts.emptyTitle||'No jobs match'}</h3><p>${opts.emptySub||'Try clearing filters or search.'}</p></div></div>`;
       return;
     }
     cont.innerHTML = `
@@ -962,7 +968,7 @@ function renderTableView(main, opts){
         <table>
           <thead>
             <tr>
-              ${TABLE_COLS.map(col=>`
+              ${cols.map(col=>`
                 <th data-k="${col.key}">
                   <div class="th-inner">
                     <span>${col.label}${sortState.key===col.key ? (sortState.dir===1?' ▲':' ▼') : ''}</span>
@@ -973,7 +979,7 @@ function renderTableView(main, opts){
             </tr>
           </thead>
           <tbody>
-            ${rows.map(j=>`<tr>${TABLE_COLS.map(col=>colCellHtml(col, j, canEdit)).join('')}</tr>`).join('')}
+            ${rows.map(j=>`<tr>${cols.map(col=>colCellHtml(col, j, canEdit)).join('')}</tr>`).join('')}
           </tbody>
         </table>
       </div>
@@ -992,9 +998,126 @@ function renderTableView(main, opts){
       cont.querySelectorAll('td[data-field]').forEach(cell=>{
         cell.addEventListener('click', ()=>beginInlineEdit(cell, drawTable));
       });
+      cont.querySelectorAll('.pm-checkbox').forEach(cb=>{
+        cb.addEventListener('change', async ()=>{
+          const jobNo = cb.dataset.job, field = cb.dataset.checkboxField;
+          const job = allJobs.find(j=>j.job_no===jobNo);
+          const { error } = await supa.from('jobs').update({ [field]: cb.checked, updated_by: profile.username }).eq('job_no', jobNo);
+          if (error){ showToast('Save failed: '+error.message, true); cb.checked = !cb.checked; return; }
+          job[field] = cb.checked;
+          showToast(cb.checked ? 'Added' : 'Removed');
+          drawTable();
+        });
+      });
     }
   }
   drawTable();
+}
+
+/* ================================================================
+   PLANNING MASTER — "Add to plan" panel
+   Mirrors the one manual step your Excel Planning Master actually had:
+   typing/pasting a Job No. Everything else about the job (customer, EDD,
+   qty, hold status…) is already in the system from the ERP import — no
+   VLOOKUP needed, it's the same table. This just flags which jobs are on
+   the working list.
+   ================================================================ */
+function planningAddPanelHtml(){
+  return `
+    <div class="panel" id="planning-add-panel" style="margin-bottom:16px;">
+      <p class="panel-title">Add jobs to your plan</p>
+      <p style="font-size:12.5px;color:var(--ink-soft);margin-top:-6px;">
+        Paste Job Numbers copied straight from Excel (one per line or column — a whole "Job No" column works), or upload a .csv/.xlsx that has a Job No column. Jobs must already be imported from ERP first.
+      </p>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:10px;">
+        <div style="flex:1;min-width:260px;">
+          <textarea id="pm-paste-area" placeholder="JB072600010221&#10;JB072600010004&#10;JB072600009898" style="min-height:90px;"></textarea>
+          <button class="btn small" id="pm-add-paste-btn" style="width:auto;margin-top:8px;padding:8px 16px;">Add pasted jobs</button>
+        </div>
+        <div style="flex:0 0 220px;">
+          <div class="import-box" id="pm-drop-zone" style="padding:16px 10px;">
+            <p style="margin:0 0 8px;color:var(--ink-soft);font-size:12px;">Drop a .csv or .xlsx here, or</p>
+            <input type="file" id="pm-file-input" accept=".csv,.xlsx,.xls" style="display:none;">
+            <button class="btn ghost small" id="pm-file-btn">Choose file</button>
+          </div>
+        </div>
+      </div>
+      <div id="pm-add-result" style="margin-top:10px;"></div>
+    </div>
+  `;
+}
+
+function wirePlanningAddPanel(onDone){
+  document.getElementById('pm-add-paste-btn').addEventListener('click', ()=>{
+    const text = document.getElementById('pm-paste-area').value;
+    if (!text.trim()){ showToast('Paste some job numbers first', true); return; }
+    addJobsToPlanning(extractJobNumbers(text), onDone);
+  });
+  document.getElementById('pm-file-btn').addEventListener('click', ()=>document.getElementById('pm-file-input').click());
+  document.getElementById('pm-file-input').addEventListener('change', e=>{ if (e.target.files[0]) handlePlanningFile(e.target.files[0], onDone); });
+  const dz = document.getElementById('pm-drop-zone');
+  dz.addEventListener('dragover', e=>{ e.preventDefault(); dz.classList.add('drag'); });
+  dz.addEventListener('dragleave', ()=>dz.classList.remove('drag'));
+  dz.addEventListener('drop', e=>{ e.preventDefault(); dz.classList.remove('drag'); if (e.dataTransfer.files[0]) handlePlanningFile(e.dataTransfer.files[0], onDone); });
+}
+
+function handlePlanningFile(file, onDone){
+  const name = file.name.toLowerCase();
+  if (name.endsWith('.csv')){
+    Papa.parse(file, { skipEmptyLines:true, complete: res => addJobsToPlanning(jobNumbersFromRows(res.data), onDone) });
+  } else {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const wb = XLSX.read(e.target.result, { type:'array', cellDates:false });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header:1, raw:true, defval:'' });
+      addJobsToPlanning(jobNumbersFromRows(rows), onDone);
+    };
+    reader.readAsArrayBuffer(file);
+  }
+}
+
+// Pasted plain text: one job number per line (tabs/commas ignored, first token used)
+function extractJobNumbers(text){
+  return [...new Set(
+    text.split(/\r?\n/)
+      .map(line => line.split(/[\t,]/)[0].trim())
+      .filter(v => v && normalizeHeader(v) !== 'jobno')
+  )];
+}
+// Parsed rows from a file: use a "Job No" column if the header row has one, else first column
+function jobNumbersFromRows(rows){
+  if (!rows.length) return [];
+  let colIdx = 0, startRow = 0;
+  const headerNorm = (rows[0]||[]).map(normalizeHeader);
+  const jobNoCol = headerNorm.indexOf('jobno');
+  if (jobNoCol >= 0){ colIdx = jobNoCol; startRow = 1; }
+  return [...new Set(
+    rows.slice(startRow)
+      .map(r => String((r||[])[colIdx]||'').trim())
+      .filter(Boolean)
+  )];
+}
+
+async function addJobsToPlanning(jobNumbers, onDone){
+  const resultBox = document.getElementById('pm-add-result');
+  if (!jobNumbers.length){ showToast('No job numbers found', true); return; }
+  const matched = jobNumbers.filter(no => allJobs.some(j=>j.job_no===no));
+  const unmatched = jobNumbers.filter(no => !allJobs.some(j=>j.job_no===no));
+  if (matched.length){
+    const { error } = await supa.from('jobs').update({ in_planning: true, updated_by: profile.username }).in('job_no', matched);
+    if (error){ showToast('Failed to add: '+error.message, true); return; }
+    matched.forEach(no => { const j = allJobs.find(x=>x.job_no===no); if (j) j.in_planning = true; });
+  }
+  resultBox.innerHTML = `
+    <div style="font-size:12.5px;padding:10px 12px;border-radius:4px;background:var(--green-bg);color:var(--green);">
+      Added ${matched.length} job${matched.length===1?'':'s'} to the plan.
+    </div>
+    ${unmatched.length ? `<div class="warn-list" style="margin-top:8px;">${unmatched.length} job number${unmatched.length===1?'':'s'} not found — import them from ERP first: ${unmatched.slice(0,20).join(', ')}${unmatched.length>20?'…':''}</div>` : ''}
+  `;
+  showToast(`Added ${matched.length} job${matched.length===1?'':'s'} to plan`);
+  document.getElementById('pm-paste-area').value = '';
+  if (onDone) onDone();
 }
 
 let columnFilters = {};
