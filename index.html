@@ -359,6 +359,9 @@ const VIEWS = [
     { key:'dashboard', label:'Dashboard' },
     { key:'alljobs', label:'All Jobs' },
   ]},
+  { group: 'Planning', items: [
+    { key:'planningmaster', label:'Planning Master' },
+  ]},
   { group: 'Risk Views', items: [
     { key:'check', label:'Check (Undelivered)' },
     { key:'partial', label:'Partial Status' },
@@ -376,15 +379,16 @@ const VIEWS = [
 // The pages an Admin can grant/restrict per user, one row each in Manage Users.
 // 'editable:false' means the page has no editable cells (view-only by nature).
 const PERM_VIEWS = [
-  { key:'dashboard',  label:'Dashboard',              editable:false },
-  { key:'alljobs',    label:'All Jobs',                editable:true  },
-  { key:'check',      label:'Check (Undelivered)',     editable:true  },
-  { key:'partial',    label:'Partial Status',          editable:true  },
-  { key:'hold',       label:'HOLD',                    editable:true  },
-  { key:'outsource',  label:'Outsource',                editable:true  },
-  { key:'wfm',        label:'Waiting for Material',    editable:true  },
-  { key:'committed',  label:'Committed EDD',           editable:true  },
-  { key:'import',     label:'Import Data',             editable:true  },
+  { key:'dashboard',       label:'Dashboard',              editable:false },
+  { key:'alljobs',         label:'All Jobs',                editable:true  },
+  { key:'planningmaster',  label:'Planning Master',         editable:true  },
+  { key:'check',           label:'Check (Undelivered)',     editable:true  },
+  { key:'partial',         label:'Partial Status',          editable:true  },
+  { key:'hold',            label:'HOLD',                    editable:true  },
+  { key:'outsource',       label:'Outsource',                editable:true  },
+  { key:'wfm',             label:'Waiting for Material',    editable:true  },
+  { key:'committed',       label:'Committed EDD',           editable:true  },
+  { key:'import',          label:'Import Data',             editable:true  },
 ];
 
 /* ================================================================
@@ -484,7 +488,10 @@ function toggleTheme(){
 // what actually gets stored as auth.users.email. This also means each
 // username is automatically unique, since Supabase won't allow duplicate
 // emails to sign up.
-const USERNAME_EMAIL_DOMAIN = 'users.enamtrims.internal';
+// NOTE: this must NOT be a reserved/special-use domain (.test, .example,
+// .invalid, .localhost, .internal, etc.) — Supabase's email validator
+// rejects those outright, even though no mail is ever actually sent here.
+const USERNAME_EMAIL_DOMAIN = 'users.enamtrims-app.com';
 function normalizeUsername(raw){
   return String(raw||'').trim().toLowerCase().replace(/[^a-z0-9._-]/g, '');
 }
@@ -708,6 +715,7 @@ function renderView(key){
   switch(key){
     case 'dashboard': renderDashboard(main); break;
     case 'alljobs': renderTableView(main, {title:'All Jobs', sub:'Every job currently in the system', filterFn:()=>true}); break;
+    case 'planningmaster': renderTableView(main, {title:'Planning Master', sub:'Every open job — set priority, planned date, and notes to decide what runs next', filterFn:j=>!isFullyDelivered(j), defaultSort:'priority'}); break;
     case 'check': renderTableView(main, {title:'Check — Undelivered Jobs', sub:'All jobs with outstanding quantity, sorted by EDD', filterFn:j=>!isFullyDelivered(j), defaultSort:'edd'}); break;
     case 'partial': renderTableView(main, {title:'Partial Status', sub:'Jobs partially delivered with a remaining balance', filterFn:isPartial}); break;
     case 'hold': renderTableView(main, {title:'HOLD', sub:'Jobs currently on hold and why', filterFn:j=>j._isHold && !isFullyDelivered(j)}); break;
@@ -831,6 +839,8 @@ const TABLE_COLS = [
   { key:'edd',            label:'EDD',           type:'date',   editable:true },
   { key:'committed_edd',  label:'Committed EDD', type:'date',   editable:true },
   { key:'job_status',     label:'Status',        type:'text',   editable:true },
+  { key:'priority',       label:'Priority',      type:'select', editable:true, options:['Urgent','High','Normal','Low'] },
+  { key:'planned_date',   label:'Planned Date',  type:'date',   editable:true },
   { key:'hold_status',    label:'Hold Status',   type:'text',   editable:true },
   { key:'hold_reason',    label:'Hold Reason',   type:'text',   editable:true },
   { key:'planning_notes', label:'Planning Notes',type:'text',   editable:true },
@@ -846,10 +856,17 @@ function colDisplay(col, j){
   return v==null ? '' : String(v);
 }
 
+const PRIORITY_BADGE = { Urgent:'crit', High:'high', Normal:'none', Low:'low' };
+const PRIORITY_ORDER = ['Urgent','High','Normal','Low'];
+
 function colCellHtml(col, j, canEdit){
   if (col.key==='job_no') return `<td class="job-no">${j.job_no||''}</td>`;
   if (col.key==='_risk') return `<td><span class="badge ${j._riskBand}">${j._risk}</span></td>`;
   if (col.key==='_undelivered') return `<td class="num">${fmtNum(j._undelivered)}</td>`;
+  if (col.key==='priority' && !(canEdit)){
+    const p = j.priority || 'Normal';
+    return `<td><span class="badge ${PRIORITY_BADGE[p]||'none'}">${p}</span></td>`;
+  }
   const raw = j[col.key];
   const disp = colDisplay(col, j);
   const align = col.type==='number' ? ' class="num' + (col.editable && canEdit ? ' editable-cell' : '') + '"' : (col.editable && canEdit ? ' class="editable-cell"' : '');
@@ -916,6 +933,10 @@ function renderTableView(main, opts){
     let rows = baseRows(null);
     if (sortState.key){
       rows.sort((a,b)=>{
+        if (sortState.key==='priority'){
+          const ra = PRIORITY_ORDER.indexOf(a.priority||'Normal'); const rb = PRIORITY_ORDER.indexOf(b.priority||'Normal');
+          return ((ra<0?99:ra) - (rb<0?99:rb)) * sortState.dir;
+        }
         let av = a[sortState.key], bv = b[sortState.key];
         if (av==null) av=''; if (bv==null) bv='';
         if (typeof av==='number' || typeof bv==='number') return ((Number(av)||0)-(Number(bv)||0))*sortState.dir;
