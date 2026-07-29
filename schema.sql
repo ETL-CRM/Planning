@@ -57,6 +57,11 @@ create table if not exists jobs (
   planned_date            date,
   planning_notes          text,
   priority                text default 'Normal' check (priority in ('Urgent','High','Normal','Low')),
+  -- Whether this job has been added to the Planning Master working list.
+  -- In your Excel file, every OTHER Planning Master column was a VLOOKUP off
+  -- ERP DATA — the only thing a person actually typed there was the Job No
+  -- itself. This flag is that same manual step: "this job is on my list".
+  in_planning              boolean not null default false,
 
   -- bookkeeping
   created_at              timestamptz default now(),
@@ -78,6 +83,9 @@ do $$ begin
 end $$;
 update jobs set priority = 'Normal' where priority is null;
 
+alter table jobs add column if not exists in_planning boolean not null default false;
+create index if not exists idx_jobs_in_planning on jobs (in_planning);
+
 -- keep updated_at fresh on every write
 create or replace function set_updated_at()
 returns trigger as $$
@@ -98,15 +106,17 @@ create trigger trg_jobs_updated_at
 -- New signups default to 'viewer'. Promote the first admin manually
 -- (see README "First-time setup").
 --
--- Sign-in is username + password, not email. Supabase Auth still needs an
--- email internally, so the app builds a fake one behind the scenes
--- (e.g. "rizvi.hasan@users.enamtrims-app.com") and stores it in `email`.
--- The real, human-facing username lives in the `username` column below.
+-- Sign-in is real work email + password (e.g. rahatul@enamtrims.com).
+-- `username` is just a friendly display label auto-derived from the part of
+-- the email before the @ — it's shown in Manage Users and in "updated by"
+-- fields, but it isn't what anyone types to sign in, and it doesn't need to
+-- be unique (two people with the same email prefix on different domains is
+-- fine — Supabase's own uniqueness check on the real email is what matters).
 
 create table if not exists profiles (
   id          uuid references auth.users on delete cascade primary key,
-  email       text,                       -- internal-only synthetic address, not a real inbox
-  username    text unique,                -- what people actually sign in with
+  email       text,                       -- the real work email used to sign in
+  username    text,                       -- friendly display label, e.g. "rahatul"
   full_name   text,
   role        text not null default 'viewer' check (role in ('admin','planning','viewer')),
   -- per-page view/edit overrides, e.g. {"hold":{"view":true,"edit":false}}
@@ -117,9 +127,11 @@ create table if not exists profiles (
 
 -- if this table already existed before "username" was added, this adds it safely
 alter table profiles add column if not exists username text;
+-- if an earlier version of this schema added a unique constraint on username,
+-- drop it — username is just a display label now, not a login credential
 do $$ begin
-  if not exists (select 1 from pg_constraint where conname = 'profiles_username_key') then
-    alter table profiles add constraint profiles_username_key unique (username);
+  if exists (select 1 from pg_constraint where conname = 'profiles_username_key') then
+    alter table profiles drop constraint profiles_username_key;
   end if;
 end $$;
 -- backfill username for any existing rows created before this column existed
@@ -133,7 +145,7 @@ create or replace function handle_new_user()
 returns trigger as $$
 begin
   insert into public.profiles (id, email, username, role)
-  values (new.id, new.email, coalesce(new.raw_user_meta_data->>'username', split_part(new.email,'@',1)), 'viewer');
+  values (new.id, new.email, split_part(new.email,'@',1), 'viewer');
   return new;
 end;
 $$ language plpgsql security definer;
@@ -143,6 +155,31 @@ create trigger trg_on_auth_user_created
   after insert on auth.users
   for each row execute function handle_new_user();
 
+
+-- Lets the very first person self-promote to Admin from inside the app,
+-- with no SQL Editor step required. Runs as the table owner (security
+-- definer), which is what lets it bypass the normal "only an Admin can
+-- change roles" rule — but only succeeds while zero Admins exist anywhere
+-- in the workspace, so it can't be used to grab admin later.
+create or replace function claim_first_admin()
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  affected int;
+begin
+  update profiles
+  set role = 'admin'
+  where id = auth.uid()
+    and not exists (select 1 from profiles p2 where p2.role = 'admin');
+  get diagnostics affected = row_count;
+  return affected > 0;
+end;
+$$;
+
+grant execute on function claim_first_admin() to authenticated;
 
 -- 3. IMPORT LOG (optional but useful for auditing bulk pastes) ---
 create table if not exists import_log (
@@ -209,5 +246,5 @@ create policy "import_log_insert" on import_log
 -- ============================================================
 -- Done. Next step: create your first user via Supabase
 -- Authentication tab, then in SQL editor run:
---   update profiles set role = 'admin' where username = 'yourusername';
+--   update profiles set role = 'admin' where email = 'rahatul@enamtrims.com';
 -- ============================================================
