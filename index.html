@@ -138,7 +138,13 @@
   }
 
   /* ---------- App shell ---------- */
-  #app{display:none;height:100vh;grid-template-columns:220px 1fr;}
+  #app{display:none;height:100vh;grid-template-columns:220px 1fr;grid-template-rows:auto 1fr;}
+  #claim-admin-banner{
+    display:none;grid-column:1/-1;align-items:center;justify-content:center;gap:14px;flex-wrap:wrap;
+    background:var(--amber-bg);color:var(--amber);padding:12px 20px;font-size:13.5px;font-weight:600;
+    border-bottom:1px solid var(--line);
+  }
+  #claim-admin-banner button{width:auto;padding:7px 16px;}
   #app.active{display:grid;}
   #sidebar{
     background:var(--navy);color:#cdd6e4;padding:22px 14px;display:flex;flex-direction:column;
@@ -317,6 +323,10 @@
 
 <!-- ================= MAIN APP ================= -->
 <div id="app">
+  <div id="claim-admin-banner">
+    <span>⚡ No Admin has been set up for this workspace yet.</span>
+    <button class="btn" id="claim-admin-btn">Claim Admin Access</button>
+  </div>
   <div id="sidebar">
     <div class="brand">
       <div class="brand-name">Enam Trims Ltd.</div>
@@ -439,6 +449,7 @@ function init(){
   document.getElementById('auth-toggle-link').addEventListener('click', toggleAuthMode);
   document.getElementById('logout-btn').addEventListener('click', handleLogout);
   document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
+  document.getElementById('claim-admin-btn').addEventListener('click', handleClaimAdmin);
 
   supa.auth.getSession().then(({data})=>{
     if (data.session){ session = data.session; onLoggedIn(); }
@@ -528,9 +539,35 @@ async function onLoggedIn(){
   document.getElementById('user-email').textContent = profile.email || session.user.email;
   document.getElementById('user-role').textContent = profile.role;
 
+  await refreshClaimAdminBanner();
   renderNav();
   await loadJobs();
   renderView('dashboard');
+}
+
+// Shows a one-click "Claim Admin Access" banner when nobody on this
+// workspace is an Admin yet — avoids needing SQL Editor for the very first
+// account. Once any account is Admin, this banner disappears for everyone.
+async function refreshClaimAdminBanner(){
+  const banner = document.getElementById('claim-admin-banner');
+  if (profile.role === 'admin'){ banner.style.display='none'; return; }
+  const { count } = await supa.from('profiles').select('id', { count:'exact', head:true }).eq('role','admin');
+  banner.style.display = (count === 0) ? 'flex' : 'none';
+}
+
+async function handleClaimAdmin(){
+  const btn = document.getElementById('claim-admin-btn');
+  btn.disabled = true; btn.textContent = 'Claiming…';
+  const { data, error } = await supa.rpc('claim_first_admin');
+  btn.disabled = false; btn.textContent = 'Claim Admin Access';
+  if (error){ showToast('Failed: '+error.message, true); return; }
+  if (!data){ showToast('Someone already claimed Admin — refresh the page.', true); document.getElementById('claim-admin-banner').style.display='none'; return; }
+  profile.role = 'admin';
+  document.getElementById('user-role').textContent = profile.role;
+  document.getElementById('claim-admin-banner').style.display='none';
+  showToast('You are now Admin!');
+  renderNav();
+  renderView(currentView);
 }
 
 /* ================================================================
