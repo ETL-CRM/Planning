@@ -6,6 +6,11 @@ Files:
 `schema.sql` — run once in Supabase (or re-run — it's safe to run again)
 `index.html` — the whole app (no build step)
 What's new in this update
+"Claim Admin Access" button — no more SQL Editor to become the first
+Admin. If nobody in the workspace is Admin yet, you'll see a banner with
+a button right in the app; click it and you're Admin. See "Create your
+first account" below. Re-run `schema.sql` for this — it adds the function
+that makes it work.
 Sign in with your real work email again — after trying a
 username-only login, we went back to real email + password. The
 username-only version needed a fake internal email address behind the
@@ -72,17 +77,24 @@ Deploy the app first (step 4 below), or just open `index.html` locally in
 a browser (double-click it — it works without a server).
 Click "Create an account", sign up with your real work email
 (e.g. `rahatul@enamtrims.com`) and a password.
-Back in Supabase → SQL Editor, run:
-```sql
-   update profiles set role = 'admin' where email = 'rahatul@enamtrims.com';
-   ```
-Refresh the app and sign in. You'll now see Import Data and
-Manage Users in the sidebar.
+Sign in. Since nobody on this workspace is Admin yet, you'll see a
+banner at the top: "No Admin has been set up yet" with a
+Claim Admin Access button — click it. That's it, no SQL needed.
+(This banner appears for anyone who's not Admin, but the button only
+works while zero Admin accounts exist — the first click wins, and after
+that it disappears for everyone.)
+You'll now see Import Data and Manage Users in the sidebar.
 From Manage Users, promote your Planning coordinator's account to
 the Planning role once they sign up (they can edit committed EDD,
 hold reasons, and import data; they can't delete jobs or change roles).
 From the same page you can also fine-tune exactly which pages each person
 can see and edit — see "Managing who sees / edits what" below.
+If the banner doesn't show up (e.g. you already fought through this with
+SQL before this feature existed), you can always fall back to Supabase →
+SQL Editor:
+```sql
+update profiles set role = 'admin' where email = 'rahatul@enamtrims.com';
+```
 Forgot password? If "Confirm email" is on and you have real SMTP/email
 configured in Supabase, the normal password-reset flow works. Otherwise, an
 Admin can reset it directly in Supabase → Authentication → Users → find the
